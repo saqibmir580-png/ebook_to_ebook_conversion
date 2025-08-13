@@ -1,0 +1,44 @@
+venv
+.env
+__pycache__
+*.pyc
+
+# Database
+*.sqlite
+
+# IDE
+.idea
+.vscode
+
+# Build
+build
+dist
+
+# Logs
+*.log
+
+# Virtual environment
+venv
+
+# Temporary files
+*.tmp
+*.temp
+
+# Editor
+.idea
+.vscode
+
+# Build
+build
+dist
+
+# Logs
+*.log
+
+# Virtual environment
+venv
+
+# Temporary files
+*.tmp
+*.temp
+    
