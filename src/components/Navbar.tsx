@@ -10,10 +10,20 @@ const Navbar: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    logout();
-    navigate('/');
+  const handleLogout = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation(); // Prevent event bubbling
     setIsUserMenuOpen(false);
+    
+    try {
+      await logout();
+      // Small delay to allow toast to show before navigation
+      setTimeout(() => {
+        navigate('/');
+      }, 100);
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
   };
 
   const isActive = (path: string) => location.pathname === path;

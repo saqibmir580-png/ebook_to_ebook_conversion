@@ -1,19 +1,38 @@
-import React, { useState, useRef } from 'react';
-import { ArrowLeft, Upload, FileText, Wand2, Download, Check, AlertCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { ArrowLeft, Upload, FileText, Wand2, Download, Check } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { toast } from 'react-toastify';
 import FileUpload from '../components/FileUpload';
 import TextEditor from '../components/TextEditor';
 import XMLEditor from '../components/XMLEditor';
 import ExportOptions from '../components/ExportOptions';
+import { getUpload } from '../services/api';
+
+interface ExtractedImage {
+  url: string;
+  alt?: string;
+}
+
+interface ExtractedContent {
+  text: string;
+  images: ExtractedImage[];
+}
+
+// Using the same interface as in api.ts
+import { UploadResponse } from '../services/api';
 
 type WorkflowStep = 'upload' | 'extract' | 'edit' | 'validate' | 'export';
 
 const ConversionWorkflow: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<WorkflowStep>('upload');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [extractedText, setExtractedText] = useState('');
+  const [extractedContent, setExtractedContent] = useState<ExtractedContent>({ 
+    text: '', 
+    images: [] 
+  });
   const [editedText, setEditedText] = useState('');
   const [xmlContent, setXmlContent] = useState('');
+  const [processingStatus, setProcessingStatus] = useState('');
 
   const steps = [
     { id: 'upload', name: 'Upload', icon: Upload, description: 'Upload your document' },
@@ -26,17 +45,127 @@ const ConversionWorkflow: React.FC = () => {
   const getStepIndex = (step: WorkflowStep) => steps.findIndex(s => s.id === step);
   const currentStepIndex = getStepIndex(currentStep);
 
-  const handleFileUpload = (file: File) => {
+  const handleFileUpload = async (file: File, uploadId?: string, jatsXml?: string) => {
     setUploadedFile(file);
-    // Simulate text extraction
-    setTimeout(() => {
-      setExtractedText(`This is extracted text from ${file.name}. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+    
+    if (jatsXml) {
+      // If we have JATS XML, use it directly
+      setXmlContent(jatsXml);
+      setProcessingStatus('Processing JATS XML...');
+      
+      // Extract text content from JATS XML for editing
+      try {
+        // Simple extraction of text content from JATS XML
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(jatsXml, 'text/xml');
+        const textContent = Array.from(xmlDoc.getElementsByTagName('p'))
+          .map(p => p.textContent)
+          .join('\n\n');
+          
+        setExtractedContent({
+          text: textContent || 'No text content extracted from JATS XML.',
+          images: [] // You can extract images from JATS XML if needed
+        });
+        setEditedText(textContent);
+        setCurrentStep('extract');
+      } catch (error) {
+        console.error('Error parsing JATS XML:', error);
+        toast.error('Error processing JATS XML content');
+        setCurrentStep('upload');
+      } finally {
+        setProcessingStatus('');
+      }
+    } else if (uploadId) {
+      // Fallback to the original behavior if no JATS XML is provided
+      setProcessingStatus('Uploading file...');
+      await checkUploadStatus(uploadId);
+    }
+  };
 
-Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-
-Here are some intentional mispellings for testing: recieve, seperate, occured, definately.`);
-      setCurrentStep('extract');
-    }, 2000);
+  const checkUploadStatus = async (id: string): Promise<void> => {
+    try {
+      setProcessingStatus('Processing your document...');
+      
+      const response = await getUpload(id);
+      
+      // Log the full response for debugging
+      console.log('Upload status response:', response);
+      
+      // Map the response status to our workflow states
+      if (response.status === 'completed' || response.status === 'processed' || response.status === 'COMPLETED') {
+        // Try to get JATS XML if available
+        if (response.jats_xml) {
+          setXmlContent(response.jats_xml);
+          
+          // Extract text content from JATS XML for editing
+          try {
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(response.jats_xml, 'text/xml');
+            const textContent = Array.from(xmlDoc.getElementsByTagName('p'))
+              .map(p => p.textContent)
+              .join('\n\n');
+              
+            setExtractedContent({
+              text: textContent || 'No text content extracted from JATS XML.',
+              images: []
+            });
+            setEditedText(textContent);
+          } catch (error) {
+            console.error('Error parsing JATS XML:', error);
+            // Fall back to extracted text if available
+            const fallbackText = response.extracted_text || 'No text content available.';
+            setExtractedContent({
+              text: fallbackText,
+              images: []
+            });
+            setEditedText(fallbackText);
+          }
+        } else {
+          // Fallback to extracted text if no JATS XML is available
+          const extractedText = response.extracted_text || 'No text content extracted.';
+          const extractedImages: ExtractedImage[] = response.extracted_images?.map((img, index) => ({
+            url: img.url,
+            alt: img.alt || `Extracted image ${index + 1}`
+          })) || [];
+          
+          setExtractedContent({
+            text: extractedText,
+            images: extractedImages
+          });
+          setEditedText(extractedText);
+        }
+        
+        setCurrentStep('extract');
+      } 
+      else if (response.status === 'processing' || response.status === 'pending') {
+        // Check again after a delay with exponential backoff
+        const delay = Math.min(2000 * (1 + Math.random()), 10000); // Random delay between 2-10 seconds
+        console.log(`Upload still processing, checking again in ${delay}ms...`);
+        setTimeout(() => checkUploadStatus(id), delay);
+      }
+      else if (response.status === 'failed' || response.status === 'FAILED') {
+        const errorMsg = response.error_message || 'File processing failed';
+        console.error('Upload processing failed:', errorMsg);
+        throw new Error(errorMsg);
+      }
+      else if (response.status === 'processing' || response.status === 'pending' || response.status === 'PROCESSING' || response.status === 'PENDING') {
+        // Check again after a delay with exponential backoff
+        const delay = Math.min(2000 * (1 + Math.random()), 10000); // Random delay between 2-10 seconds
+        console.log(`Upload still processing (${response.status}), checking again in ${delay}ms...`);
+        setTimeout(() => checkUploadStatus(id), delay);
+      }
+      else {
+        // Handle any error or unknown status
+        console.warn('Unknown upload status:', response.status);
+        throw new Error(`Unexpected status: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('Error checking upload status:', error);
+      toast.error(`Error processing file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setCurrentStep('upload');
+    } finally {
+      setProcessingStatus('');
+    }
   };
 
   const handleTextEdit = (text: string) => {
@@ -70,32 +199,83 @@ Here are some intentional mispellings for testing: recieve, seperate, occured, d
             <div className="bg-white rounded-lg shadow-sm p-6">
               <h3 className="text-lg font-semibold mb-4">Text Extraction Complete</h3>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Left side: Original Document */}
                 <div>
                   <h4 className="font-medium text-gray-900 mb-2">Original Document</h4>
-                  <div className="bg-gray-100 p-4 rounded-lg h-64 flex items-center justify-center">
-                    <div className="text-center text-gray-500">
-                      <FileText className="h-12 w-12 mx-auto mb-2" />
-                      <p>{uploadedFile?.name}</p>
-                      <p className="text-sm">Preview not available</p>
-                    </div>
+                  <div className="bg-gray-100 p-4 rounded-lg h-96 overflow-auto">
+                    {uploadedFile?.type.startsWith('image/') ? (
+                      <img 
+                        src={URL.createObjectURL(uploadedFile)} 
+                        alt="Uploaded document"
+                        className="max-w-full h-auto max-h-80 mx-auto"
+                      />
+                    ) : (
+                      <div className="h-full flex flex-col items-center justify-center text-center text-gray-500">
+                        <FileText className="h-12 w-12 mx-auto mb-2" />
+                        <p className="truncate max-w-full">{uploadedFile?.name}</p>
+                        <p className="text-sm mt-2">
+                          {uploadedFile?.type === 'application/pdf' 
+                            ? 'PDF document' 
+                            : 'Document preview not available'}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div>
-                  <h4 className="font-medium text-gray-900 mb-2">Extracted Text</h4>
-                  <textarea
-                    value={extractedText}
-                    readOnly
-                    className="w-full h-64 p-4 border border-gray-200 rounded-lg bg-gray-50 text-sm resize-none"
-                  />
+
+                {/* Right side: Extracted Content */}
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-2">Extracted Text</h4>
+                    <div className="border border-gray-200 rounded-lg p-4 h-64 overflow-auto bg-gray-50">
+                      {extractedContent.text || 'No text content was extracted from the document.'}
+                    </div>
+                  </div>
+
+                  {extractedContent.images.length > 0 && (
+                    <div>
+                      <h4 className="font-medium text-gray-900 mb-2">Extracted Images</h4>
+                      <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-2 border border-gray-200 rounded-lg">
+                        {extractedContent.images.map((img, index) => (
+                          <div key={index} className="relative group">
+                            <img 
+                              src={img.url} 
+                              alt={img.alt || `Extracted image ${index + 1}`}
+                              className="w-full h-20 object-cover rounded border border-gray-200"
+                            />
+                            <div className="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                              <a 
+                                href={img.url} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="text-white text-sm bg-blue-600 rounded p-1"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                View
+                              </a>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="mt-6 flex justify-end">
+              
+              <div className="mt-6 flex justify-end space-x-3">
+                <button
+                  onClick={() => setCurrentStep('upload')}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Back
+                </button>
                 <button
                   onClick={() => {
-                    setEditedText(extractedText);
+                    setEditedText(extractedContent.text);
                     setCurrentStep('edit');
                   }}
-                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  disabled={!extractedContent.text}
                 >
                   Continue to Editing
                 </button>
@@ -107,7 +287,7 @@ Here are some intentional mispellings for testing: recieve, seperate, occured, d
       case 'edit':
         return (
           <TextEditor
-            initialText={extractedText}
+            initialText={extractedContent.text}
             onTextChange={handleTextEdit}
             onNext={proceedToValidation}
           />

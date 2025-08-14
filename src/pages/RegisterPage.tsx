@@ -25,10 +25,16 @@ const RegisterPage: React.FC = () => {
     }
 
     try {
-      await register(name, email, password,confirmPassword);
-      navigate('/login');
+      const result = await register(name, email, password, confirmPassword);
+      if (result?.success) {
+        // The toast notification will be shown by the AuthContext
+        navigate('/login');
+      } else if (result?.error) {
+        setError(result.error);
+      }
     } catch (err) {
-      setError('Registration failed. Please try again.');
+      console.error('Registration error:', err);
+      // The toast notification will be shown by the AuthContext
     } finally {
       setIsLoading(false);
     }
