@@ -27,17 +27,21 @@ app = FastAPI(
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://localhost:5173",  # Vite default port
-    "http://127.0.0.1:5173"   # Vite default port
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000"
 ]
 
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
+    allow_methods=["*"],  # Allow all methods including OPTIONS for preflight
+    allow_headers=["*"],  # Allow all headers
+    expose_headers=["Content-Type", "Set-Cookie", "Authorization", "Content-Disposition"],
+    max_age=600  # 10 minutes for preflight cache
 )
 
 # Create uploads directory if it doesn't exist

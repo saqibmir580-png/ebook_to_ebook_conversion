@@ -3,6 +3,8 @@ fastapi==0.104.1
 uvicorn==0.24.0
 pydantic==2.4.2
 pydantic[email]==2.4.2
+pydantic-settings==2.0.3
+python-multipart==0.0.6
 
 # Database
 sqlalchemy==2.0.23
@@ -21,10 +23,15 @@ ebooklib==0.18
 pillow==10.1.0
 pytesseract==0.3.10
 lxml==4.9.3
+PyMuPDF==1.23.8
+opencv-python-headless==4.8.1.78
+numpy==1.26.0
 
 # Background tasks
 celery==5.3.4
 redis==5.0.1
+spacy==3.7.2
+langdetect==1.0.9
 
 # Utilities
 python-dotenv==1.0.0

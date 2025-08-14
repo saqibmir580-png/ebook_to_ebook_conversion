@@ -69,23 +69,54 @@ class EbookExtractor:
             with open(self.file_path, 'rb') as file:
                 pdf_reader = PyPDF2.PdfReader(file)
                 
-                # Get text by page
+                # Get text by page with robust error handling
                 for page_num in range(len(pdf_reader.pages)):
-                    page = pdf_reader.pages[page_num]
-                    text = page.extract_text()
-                    text_by_page.append(text)
-                    
-                    # Simple formula detection (looking for math symbols)
-                    math_symbols = re.findall(r'[=+\-*/^√∫∑∏πΔ∇]+', text)
-                    if math_symbols:
-                        formulas.extend([f"Formula on page {page_num + 1}: {m}" for m in math_symbols])
+                    try:
+                        page = pdf_reader.pages[page_num]
+                        # Extract text with error handling
+                        try:
+                            text = page.extract_text() or ""
+                            text_by_page.append(text)
+                            
+                            # Simple formula detection (looking for math symbols)
+                            math_symbols = re.findall(r'[=+\-*/^√∫∑∏πΔ∇]+', text)
+                            if math_symbols:
+                                formulas.extend([f"Formula on page {page_num + 1}: {m}" for m in math_symbols])
+                                
+                        except Exception as e:
+                            logger.warning(f"Error extracting text from page {page_num + 1}: {str(e)}")
+                            text_by_page.append("")  # Add empty string for failed page
+                            continue
+                            
+                    except Exception as e:
+                        logger.warning(f"Error accessing page {page_num + 1}: {str(e)}")
+                        text_by_page.append("")  # Add empty string for failed page
+                        continue
                 
                 # Update metadata
                 self.metadata["page_count"] = len(pdf_reader.pages)
                 
-                # Extract basic structure info - this would be more complex in a real implementation
-                if "/Font" in pdf_reader.trailer.get("/Root", {}).get("/Pages", {}):
-                    structure["fonts"] = ["PDF contains fonts"]
+                # Safely extract basic structure info
+                try:
+                    # Safely access trailer, root, and pages to avoid IndirectObject issues
+                    trailer = getattr(pdf_reader, 'trailer', {})
+                    root = {}
+                    if hasattr(trailer, 'get'):
+                        root = trailer.get('/Root', {})
+                    elif hasattr(trailer, 'resolve'):
+                        try:
+                            root = trailer.resolve().get('/Root', {})
+                        except:
+                            root = {}
+                    
+                    # Check for fonts safely
+                    if hasattr(root, 'get') and '/Pages' in root:
+                        pages = root['/Pages']
+                        if hasattr(pages, 'get') and '/Font' in pages:
+                            structure["fonts"] = ["PDF contains fonts"]
+                except Exception as e:
+                    logger.warning(f"Could not extract PDF structure: {str(e)}")
+                    # Continue without structure info if there's an error
                 
                 # In a real implementation, more detailed PDF structure extraction would happen here
                 

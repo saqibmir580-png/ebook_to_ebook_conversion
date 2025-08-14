@@ -38,7 +38,7 @@ class UploadInDBBase(UploadBase):
     updated_at: datetime
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class Upload(UploadInDBBase):
@@ -54,11 +54,15 @@ class Upload(UploadInDBBase):
     error_message: Optional[str] = None
 
 
-class UploadWithDownloadUrls(Upload):
+class UploadWithDownloadUrls(UploadInDBBase):
     xml_url: Optional[str] = None
     html_url: Optional[str] = None
     epub_url: Optional[str] = None
     mobi_url: Optional[str] = None
+    jats_xml: Optional[str] = None  # Raw JATS XML content
+    
+    class Config:
+        from_attributes = True
 
 
 class UploadStatistics(BaseModel):
@@ -68,4 +72,4 @@ class UploadStatistics(BaseModel):
     failed: int
     
     class Config:
-        orm_mode = True
+        from_attributes = True

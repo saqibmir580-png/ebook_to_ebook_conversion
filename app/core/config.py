@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "E-Book Processing API"
+    ENV: str = os.getenv("ENV", "production")  # 'development', 'staging', 'production'
     
     # JWT
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", secrets.token_urlsafe(32))
