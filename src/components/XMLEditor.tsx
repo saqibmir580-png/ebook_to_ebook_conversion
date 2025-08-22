@@ -107,18 +107,163 @@ const XMLEditor: React.FC<XMLEditorProps> = ({ content, onContentChange, onNext 
 
   const renderPreview = () => {
     try {
-      // Simple XML to HTML preview
+      // Enhanced XML to HTML preview with original PDF styling
       let preview = xmlContent
         .replace(/<\?xml[^>]*\?>/g, '')
         .replace(/<!DOCTYPE[^>]*>/g, '')
-        .replace(/<book>/g, '<div class="book">')
-        .replace(/<\/book>/g, '</div>')
-        .replace(/<title>/g, '<h1>')
-        .replace(/<\/title>/g, '</h1>')
-        .replace(/<chapter>/g, '<div class="chapter">')
-        .replace(/<\/chapter>/g, '</div>')
-        .replace(/<para>/g, '<p>')
-        .replace(/<\/para>/g, '</p>');
+        .replace(/<article[^>]*>/g, '<div class="article" style="max-width: 800px; margin: 0 auto; font-family: Arial, sans-serif; line-height: 1.6; background: white; padding: 40px;">')
+        .replace(/<\/article>/g, '</div>')
+        
+        // Journal header styling
+        .replace(/<journal-meta>([\s\S]*?)<\/journal-meta>/g, (match, content) => {
+          const titleMatch = content.match(/<journal-title>(.*?)<\/journal-title>/);
+          const issnMatch = content.match(/<issn>(.*?)<\/issn>/);
+          
+          const title = titleMatch ? titleMatch[1] : '';
+          const issn = issnMatch ? issnMatch[1] : '';
+          
+          return `
+            <div class="journal-header" style="text-align: center; margin-bottom: 30px; border-bottom: 2px solid #4A90E2; padding-bottom: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <div style="flex: 1;">
+                  <h1 style="font-size: 36px; font-weight: bold; color: #4A90E2; margin: 0; letter-spacing: 2px;">${title.split(' ')[0] || 'REVISTA'}</h1>
+                  <h2 style="font-size: 24px; font-weight: bold; color: #4A90E2; margin: 5px 0 0 0;">${title.split(' ').slice(1).join(' ') || 'MATERIA'}</h2>
+                  ${issn ? `<p style="font-size: 12px; margin: 10px 0 0 0; color: #666;">ISSN ${issn} articles e20240534, 2024</p>` : ''}
+                </div>
+                <div style="text-align: right; color: #4A90E2; font-size: 18px; font-weight: bold;">
+                  V.29 N.4
+                </div>
+              </div>
+            </div>
+          `;
+        })
+        
+        .replace(/<front[^>]*>[\s\S]*?<\/front>/g, '') // Remove front matter as it's handled above
+        .replace(/<body[^>]*>/g, '<div class="body">')
+        .replace(/<\/body>/g, '</div>')
+        
+        // Article title styling
+        .replace(/<title-group>([\s\S]*?)<\/title-group>/g, (match, content) => {
+          const titleMatch = content.match(/<article-title>(.*?)<\/article-title>/);
+          const title = titleMatch ? titleMatch[1] : '';
+          
+          return `
+            <h1 style="font-size: 24px; font-weight: bold; color: #333; margin: 30px 0 20px 0; line-height: 1.3; text-align: left;">
+              ${title}
+            </h1>
+          `;
+        })
+        
+        // Author styling with ORCID icons
+        .replace(/<contrib-group>([\s\S]*?)<\/contrib-group>/g, (match, content) => {
+          const contribs = content.match(/<contrib[^>]*>([\s\S]*?)<\/contrib>/g) || [];
+          
+          const authorHtml = contribs.map(contrib => {
+            const nameMatch = contrib.match(/<surname>(.*?)<\/surname>[\s\S]*?<given-names>(.*?)<\/given-names>/);
+            const orcidMatch = contrib.match(/<contrib-id[^>]*>(.*?)<\/contrib-id>/);
+            
+            const surname = nameMatch ? nameMatch[1] : '';
+            const givenNames = nameMatch ? nameMatch[2] : '';
+            const orcid = orcidMatch ? orcidMatch[1] : '';
+            
+            return `
+              <span style="font-size: 16px; color: #333; margin-right: 15px;">
+                ${givenNames} ${surname}<sup style="color: #4A90E2;">1,2</sup>
+                ${orcid ? `<span style="display: inline-block; width: 16px; height: 16px; background: #A6CE39; border-radius: 50%; margin-left: 5px; position: relative; top: 2px;"></span>` : ''}
+              </span>
+            `;
+          }).join('');
+          
+          return `
+            <div style="text-align: center; margin: 20px 0 30px 0; font-size: 16px;">
+              ${authorHtml}
+            </div>
+          `;
+        })
+        
+        // Affiliations
+        .replace(/<aff[^>]*>([\s\S]*?)<\/aff>/g, (match, content) => {
+          return `
+            <div style="font-size: 12px; color: #666; text-align: center; margin: 10px 0; line-height: 1.4;">
+              ${content}
+            </div>
+          `;
+        })
+        
+        // Abstract styling
+        .replace(/<abstract[^>]*>([\s\S]*?)<\/abstract>/g, (match, content) => {
+          const titleMatch = content.match(/<title>(.*?)<\/title>/);
+          const textContent = content.replace(/<title>.*?<\/title>/, '').replace(/<[^>]*>/g, '');
+          
+          return `
+            <div style="margin: 30px 0; padding: 20px 0; border-top: 1px solid #ddd;">
+              <h3 style="font-size: 14px; font-weight: bold; color: #333; margin: 0 0 10px 0; text-transform: uppercase;">ABSTRACT</h3>
+              <p style="font-size: 12px; color: #333; line-height: 1.6; text-align: justify; margin: 0;">
+                ${textContent.trim()}
+              </p>
+            </div>
+          `;
+        })
+        
+        // Keywords styling
+        .replace(/<kwd-group[^>]*>([\s\S]*?)<\/kwd-group>/g, (match, content) => {
+          const keywords = content.match(/<kwd>(.*?)<\/kwd>/g) || [];
+          const keywordText = keywords.map(kwd => kwd.replace(/<\/?kwd>/g, '')).join('; ');
+          
+          return `
+            <div style="margin: 20px 0; font-size: 12px; color: #333;">
+              <strong>Keywords:</strong> ${keywordText}.
+            </div>
+          `;
+        })
+        
+        // Section styling
+        .replace(/<sec[^>]*>/g, '<div class="section" style="margin: 25px 0;">')
+        .replace(/<\/sec>/g, '</div>')
+        .replace(/<title>/g, '<h3 style="font-size: 14px; font-weight: bold; color: #333; margin: 20px 0 10px 0; text-transform: uppercase;">')
+        .replace(/<\/title>/g, '</h3>')
+        .replace(/<p>/g, '<p style="font-size: 12px; color: #333; line-height: 1.6; text-align: justify; margin: 10px 0;">')
+        .replace(/<\/p>/g, '</p>')
+        
+        // Convert figures to images with journal styling
+        .replace(/<fig[^>]*>([\s\S]*?)<\/fig>/g, (match, content) => {
+          const labelMatch = content.match(/<label>(.*?)<\/label>/);
+          const captionMatch = content.match(/<caption>([\s\S]*?)<\/caption>/);
+          const graphicMatch = content.match(/<graphic[^>]*xlink:href="([^"]*)"[^>]*\/>/);
+          
+          const label = labelMatch ? labelMatch[1] : '';
+          const caption = captionMatch ? captionMatch[1].replace(/<[^>]*>/g, '') : '';
+          const imageUrl = graphicMatch ? graphicMatch[1] : '';
+          
+          return `
+            <div class="figure" style="margin: 30px 0; text-align: center; page-break-inside: avoid;">
+              <img src="${imageUrl}" alt="${label}" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px;" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
+              <div style="display: none; padding: 20px; background: #f9f9f9; color: #666; border: 1px solid #ddd; border-radius: 4px; font-size: 12px;">Image not available: ${imageUrl}</div>
+              <div style="margin-top: 10px; font-size: 12px; color: #333;">
+                <strong>${label}</strong>
+                ${caption ? `<br><span style="color: #666;">${caption}</span>` : ''}
+              </div>
+            </div>
+          `;
+        })
+        
+        // Convert formulas with academic styling
+        .replace(/<disp-formula[^>]*>([\s\S]*?)<\/disp-formula>/g, (match, content) => {
+          const labelMatch = content.match(/<label>(.*?)<\/label>/);
+          const texMatch = content.match(/<tex-math>([\s\S]*?)<\/tex-math>/);
+          
+          const label = labelMatch ? labelMatch[1] : '';
+          const formula = texMatch ? texMatch[1] : '';
+          
+          return `
+            <div class="formula" style="margin: 25px 0; text-align: center; page-break-inside: avoid;">
+              <div style="font-family: 'Times New Roman', serif; background: #fafafa; padding: 15px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px; font-size: 14px;">
+                ${escapeHtml(formula)}
+              </div>
+              <div style="font-size: 12px; color: #333;"><strong>${label}</strong></div>
+            </div>
+          `;
+        });
 
       return (
         <div 
@@ -129,6 +274,15 @@ const XMLEditor: React.FC<XMLEditorProps> = ({ content, onContentChange, onNext 
     } catch (error) {
       return <div className="text-red-600">Invalid XML structure</div>;
     }
+  };
+
+  const escapeHtml = (text: string) => {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   };
 
   return (

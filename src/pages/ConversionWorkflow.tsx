@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { ArrowLeft, Upload, FileText, Wand2, Download, Check, AlertCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import FileUpload from '../components/FileUpload';
-import TextEditor from '../components/TextEditor';
+import TextEditor from '../components/EditText';
 import XMLEditor from '../components/XMLEditor';
 import ExportOptions from '../components/ExportOptions';
 
@@ -14,6 +14,8 @@ const ConversionWorkflow: React.FC = () => {
   const [extractedText, setExtractedText] = useState('');
   const [editedText, setEditedText] = useState('');
   const [xmlContent, setXmlContent] = useState('');
+  const [extractedImages, setExtractedImages] = useState<string[]>([]);
+  const [jsonData, setJsonData] = useState<any[]>([]);
 
   const steps = [
     { id: 'upload', name: 'Upload', icon: Upload, description: 'Upload your document' },
@@ -26,17 +28,12 @@ const ConversionWorkflow: React.FC = () => {
   const getStepIndex = (step: WorkflowStep) => steps.findIndex(s => s.id === step);
   const currentStepIndex = getStepIndex(currentStep);
 
-  const handleFileUpload = (file: File) => {
+  const handleFileUpload = (file: File, extractedText: string, extractedImages: string[], jsonData: any[], uploadId?: string) => {
     setUploadedFile(file);
-    // Simulate text extraction
-    setTimeout(() => {
-      setExtractedText(`This is extracted text from ${file.name}. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
-
-Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-
-Here are some intentional mispellings for testing: recieve, seperate, occured, definately.`);
-      setCurrentStep('extract');
-    }, 2000);
+    setExtractedText(extractedText);
+    setExtractedImages(extractedImages || []);
+    setJsonData(jsonData || []);
+    setCurrentStep('extract');
   };
 
   const handleTextEdit = (text: string) => {
@@ -44,19 +41,136 @@ Here are some intentional mispellings for testing: recieve, seperate, occured, d
   };
 
   const proceedToValidation = () => {
-    // Convert text to basic XML structure
-    const xmlStructure = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE book PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN" 
-"http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
-<book>
-  <title>${uploadedFile?.name || 'Document'}</title>
-  <chapter>
-    <title>Chapter 1</title>
-    <para>${editedText.replace(/\n\n/g, '</para>\n    <para>')}</para>
-  </chapter>
-</book>`;
-    setXmlContent(xmlStructure);
+    // Generate proper JATS XML structure
+    const jatsXml = generateJATSXML(uploadedFile?.name || 'Document', editedText, extractedImages, jsonData);
+    setXmlContent(jatsXml);
     setCurrentStep('validate');
+  };
+
+  const generateJATSXML = (title: string, content: string, images: string[], structureData: any[]) => {
+    const currentDate = new Date().toISOString().split('T')[0];
+    
+    let jatsContent = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE article PUBLIC "-//NLM//DTD JATS (Z39.96) Journal Archiving and Interchange DTD v1.2 20190208//EN" "JATS-archivearticle1.dtd">
+<article xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:mml="http://www.w3.org/1998/Math/MathML" article-type="research-article">
+  <front>
+    <article-meta>
+      <title-group>
+        <article-title>${escapeXml(title.replace(/\.[^/.]+$/, ''))}</article-title>
+      </title-group>
+      <pub-date pub-type="epub">
+        <year>${new Date().getFullYear()}</year>
+        <month>${new Date().getMonth() + 1}</month>
+        <day>${new Date().getDate()}</day>
+      </pub-date>
+    </article-meta>
+  </front>
+  <body>`;
+
+    // Process structured data to include images inline
+    if (structureData && structureData.length > 0) {
+      let figureCounter = 0;
+      
+      structureData.forEach((page, pageIndex) => {
+        if (page.blocks && page.blocks.length > 0) {
+          jatsContent += `
+    <sec id="page${pageIndex + 1}">
+      <title>Page ${pageIndex + 1}</title>`;
+          
+          // Sort blocks by Y position to maintain reading order
+          const sortedBlocks = [...page.blocks].sort((a, b) => a.y - b.y);
+          
+          sortedBlocks.forEach((block) => {
+            if (block.type === 'text' && block.content && block.content.trim()) {
+              // Split text into paragraphs
+              const paragraphs = block.content.split('\n\n').filter(p => p.trim());
+              paragraphs.forEach(paragraph => {
+                jatsContent += `
+      <p>${escapeXml(paragraph.trim())}</p>`;
+              });
+            } else if (block.type === 'image' && block.path) {
+              figureCounter++;
+              jatsContent += `
+      <fig id="fig${figureCounter}">
+        <label>Figure ${figureCounter}</label>
+        <caption>
+          <p>Extracted figure from page ${pageIndex + 1}</p>
+        </caption>
+        <graphic xlink:href="http://localhost:8000/static/${block.path.replace('static/', '')}" />
+      </fig>`;
+            } else if (block.type === 'formula' && block.content) {
+              figureCounter++;
+              jatsContent += `
+      <disp-formula id="formula${figureCounter}">
+        <label>Formula ${figureCounter}</label>
+        <tex-math>${escapeXml(block.content)}</tex-math>
+      </disp-formula>`;
+            }
+          });
+          
+          jatsContent += `
+    </sec>`;
+        }
+      });
+    } else {
+      // Fallback to original method if no structured data
+      const sections = content.split(/=== Page \d+ ===/g).filter(section => section.trim());
+      
+      sections.forEach((section, index) => {
+        if (section.trim()) {
+          const paragraphs = section.split('\n\n').filter(p => p.trim());
+          jatsContent += `
+    <sec id="sec${index + 1}">
+      <title>Section ${index + 1}</title>`;
+          
+          paragraphs.forEach(paragraph => {
+            if (paragraph.trim()) {
+              jatsContent += `
+      <p>${escapeXml(paragraph.trim())}</p>`;
+            }
+          });
+          
+          jatsContent += `
+    </sec>`;
+        }
+      });
+
+      // Add figures for images if no structured data
+      if (images.length > 0) {
+        jatsContent += `
+    <sec id="figures">
+      <title>Figures</title>`;
+        
+        images.forEach((image, index) => {
+          jatsContent += `
+      <fig id="fig${index + 1}">
+        <label>Figure ${index + 1}</label>
+        <caption>
+          <p>Extracted figure from document</p>
+        </caption>
+        <graphic xlink:href="http://localhost:8000/${image}" />
+      </fig>`;
+        });
+        
+        jatsContent += `
+    </sec>`;
+      }
+    }
+
+    jatsContent += `
+  </body>
+</article>`;
+
+    return jatsContent;
+  };
+
+  const escapeXml = (text: string) => {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   };
 
   const renderStepContent = () => {
@@ -89,6 +203,26 @@ Here are some intentional mispellings for testing: recieve, seperate, occured, d
                   />
                 </div>
               </div>
+              {extractedImages.length > 0 && (
+                <div className="mt-6">
+                  <h4 className="font-medium text-gray-900 mb-2">Extracted Images ({extractedImages.length})</h4>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    {extractedImages.map((image, index) => (
+                      <div key={index} className="border rounded-lg p-2">
+                        <img 
+                          src={`http://localhost:8000/${image}`} 
+                          alt={`Extracted image ${index + 1}`}
+                          className="w-full h-24 object-cover rounded"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = '/placeholder-image.png';
+                          }}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Image {index + 1}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="mt-6 flex justify-end">
                 <button
                   onClick={() => {

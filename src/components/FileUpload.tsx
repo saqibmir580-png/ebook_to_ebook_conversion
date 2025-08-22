@@ -1,13 +1,25 @@
 import React, { useState, useRef } from 'react';
 import { Upload, File, X } from 'lucide-react';
+import { uploadFile, checkProcessingStatus } from '../services/api';
+import { toast } from 'react-toastify';
 
 interface FileUploadProps {
-  onFileUpload: (file: File) => void;
+  onFileUpload: (file: File, extractedText: string, extractedImages: string[], jsonData: any[], uploadId?: string, taskId?: string) => void;
+}
+
+interface ProcessingStatus {
+  status: 'processing' | 'completed' | 'error' | 'extracted' | 'failed';
+  progress: number;
+  result?: any;
+  error?: string;
 }
 
 const FileUpload: React.FC<FileUploadProps> = ({ onFileUpload }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [taskId, setTaskId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -37,13 +49,83 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileUpload }) => {
     }
   };
 
-  const handleFileUpload = (file: File) => {
+  const handleFileUpload = async (file: File) => {
+    // Check file type
+    const fileType = file.type;
+    const validTypes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'image/jpeg',
+      'image/png',
+      'text/plain'
+    ];
+
+    if (!validTypes.includes(fileType)) {
+      toast.error('Invalid file type. Please upload a PDF, DOCX, JPG, PNG, or TXT file.');
+      return;
+    }
+
     setIsUploading(true);
-    // Simulate upload delay
-    setTimeout(() => {
+    
+    try {
+      const response = await uploadFile(file);
+      
+      // Check if response indicates async processing
+      if (response.task_id) {
+        setIsUploading(false);
+        setIsProcessing(true);
+        setTaskId(response.task_id);
+        pollProcessingStatus(response.task_id);
+      } else {
+        // Synchronous processing completed
+        setIsUploading(false);
+        setProgress(100);
+        onFileUpload(file, response.extracted_text || '', response.extracted_images || [], response.extracted_json || [], response.id);
+      }
+    } catch (error) {
+      console.error('Upload error:', error);
       setIsUploading(false);
-      onFileUpload(file);
-    }, 1500);
+      setIsProcessing(false);
+      toast.error('Failed to upload file. Please try again.');
+    }
+  };
+
+  const pollProcessingStatus = async (taskId: string) => {
+    const pollInterval = setInterval(async () => {
+      try {
+        const status: ProcessingStatus = await checkProcessingStatus(taskId);
+        setProgress(status.progress);
+        
+        if (status.status === 'completed') {
+          clearInterval(pollInterval);
+          setIsProcessing(false);
+          setProgress(100);
+          
+          if (status.result) {
+            onFileUpload(status.result.file, status.result.extracted_text || '', status.result.extracted_images || [], status.result.extracted_json || [], status.result.id, taskId);
+          }
+        } else if (status.status === 'error') {
+          clearInterval(pollInterval);
+          setIsProcessing(false);
+          console.error('Processing error:', status.error);
+          toast.error(`Processing failed: ${status.error}`);
+        } else if (status.status === 'failed') {
+          clearInterval(pollInterval);
+          setIsProcessing(false);
+          console.error('Processing failed:', status.error);
+          toast.error(`Processing failed: ${status.error}`);
+        }
+      } catch (error) {
+        console.error('Error checking status:', error);
+      }
+    }, 2000); // Poll every 2 seconds
+  };
+
+  const getStatusMessage = () => {
+    if (isUploading) return 'Uploading file...';
+    if (isProcessing) return `Processing file... ${progress}%`;
+    return '';
   };
 
   const acceptedFormats = ['.pdf', '.jpg', '.jpeg', '.png', '.docx', '.txt'];
@@ -62,16 +144,21 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileUpload }) => {
           isDragOver
             ? 'border-blue-500 bg-blue-50'
             : 'border-gray-300 hover:border-gray-400'
-        } ${isUploading ? 'pointer-events-none opacity-50' : ''}`}
+        } ${isUploading || isProcessing ? 'pointer-events-none opacity-50' : ''}`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        {isUploading ? (
+        {(isUploading || isProcessing) ? (
           <div className="space-y-4">
             <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
-            <p className="text-lg font-medium text-gray-900">Uploading and processing...</p>
-            <p className="text-gray-600">This may take a few moments</p>
+            <p className="text-lg font-medium text-gray-900">{getStatusMessage()}</p>
+            <div className="progress-bar">
+              <div 
+                className="progress-fill" 
+                style={{ width: `${progress}%` }}
+              ></div>
+            </div>
           </div>
         ) : (
           <div className="space-y-4">

@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Download, FileText, Globe, BookOpen, File, CheckCircle, Settings } from 'lucide-react';
 
 interface ExportOptionsProps {
   xmlContent: string;
   fileName: string;
+  uploadId?: string; 
+  taskId?: string;
+  onExportComplete?: () => void;
 }
 
 interface ExportFormat {
@@ -15,16 +18,33 @@ interface ExportFormat {
   popular?: boolean;
 }
 
-const ExportOptions: React.FC<ExportOptionsProps> = ({ xmlContent, fileName }) => {
-  const [selectedFormat, setSelectedFormat] = useState<string>('epub');
+const API_BASE_URL = 'http://localhost:8000'; 
+
+const ExportOptions: React.FC<ExportOptionsProps> = ({ xmlContent, fileName, uploadId, taskId, onExportComplete }) => {
+  const [selectedFormat, setSelectedFormat] = useState<string>('html');
   const [isExporting, setIsExporting] = useState(false);
   const [exportComplete, setExportComplete] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [customSettings, setCustomSettings] = useState({
     includeImages: true,
     optimizeForMobile: true,
     includeTableOfContents: true,
     compressionLevel: 'medium'
   });
+  const [exportProgress, setExportProgress] = useState(0);
+  const [isExportingFile, setIsExportingFile] = useState(false); // Separate state for export process
+
+  useEffect(() => {
+    // Reset states when component mounts or uploadId changes
+    setExportComplete(false);
+    setExportError(null);
+    setIsExporting(false);
+    setExportProgress(0);
+    setIsExportingFile(false);
+  }, [uploadId]);
+
+  // Debug logging
+  console.log('ExportOptions rendered with:', { fileName, uploadId, taskId, selectedFormat });
 
   const exportFormats: ExportFormat[] = [
     {
@@ -38,7 +58,7 @@ const ExportOptions: React.FC<ExportOptionsProps> = ({ xmlContent, fileName }) =
     {
       id: 'html',
       name: 'HTML',
-      description: 'Web-ready HTML format with CSS styling',
+      description: 'Web-ready HTML format with CSS styling and embedded images',
       icon: <Globe className="h-6 w-6" />,
       extension: '.html',
       popular: true
@@ -73,26 +93,89 @@ const ExportOptions: React.FC<ExportOptionsProps> = ({ xmlContent, fileName }) =
     }
   ];
 
-  const handleExport = () => {
+  const handleExport = async (format: string) => {
+    if (!uploadId) {
+      console.error('No uploadId provided for export');
+      setExportError('Missing upload ID. Please try again.');
+      return;
+    }
+
     setIsExporting(true);
-    
-    // Simulate export process
-    setTimeout(() => {
-      setIsExporting(false);
-      setExportComplete(true);
+    setExportError(null);
+    setExportComplete(false);
+    setIsExportingFile(true);
+
+    try {
+      // Start progress animation
+      setExportProgress(20);
       
-      // Create and download file
-      const selectedFormatData = exportFormats.find(f => f.id === selectedFormat);
-      const blob = new Blob([xmlContent], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${fileName.replace(/\.[^/.]+$/, '')}${selectedFormatData?.extension || '.txt'}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 3000);
+      const downloadUrl = `${API_BASE_URL}/api/v1/downloads/public/export/${uploadId}?format=${format}`;
+      console.log('Starting export with URL:', downloadUrl);
+
+      // Update progress
+      setExportProgress(50);
+
+      // Create a download link approach
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `${fileName.replace(/\.[^/.]+$/, '')}.${format}`;
+      link.style.display = 'none';
+      
+      // Update progress before download
+      setExportProgress(75);
+      
+      // Add to DOM, click, and remove
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      // Force progress to 100% immediately after download
+      setExportProgress(100);
+
+      // Mark workflow as completed if taskId is provided
+      if (taskId) {
+        try {
+          const token = localStorage.getItem('access_token');
+          if (token) {
+            await fetch(`${API_BASE_URL}/api/v1/ocr/complete/${taskId}`, {
+              method: 'POST',
+              headers: { 
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+            console.log('Task marked as completed successfully');
+          }
+        } catch (error) {
+          console.error('Failed to mark task as completed:', error);
+          // Don't fail the export if marking as complete fails
+        }
+      }
+
+      // Force 100% multiple times to ensure it sticks
+      setExportProgress(100);
+      setTimeout(() => setExportProgress(100), 100);
+      setTimeout(() => setExportProgress(100), 200);
+      setTimeout(() => setExportProgress(100), 300);
+      
+      // Show completion after ensuring 100%
+      setTimeout(() => {
+        setExportProgress(100); // Final 100% enforcement
+        setExportComplete(true);
+        setIsExporting(false);
+        setIsExportingFile(false);
+        if (onExportComplete) {
+          onExportComplete();
+        }
+      }, 500);
+
+    } catch (error) {
+      console.error('Export error:', error);
+      setExportError(error instanceof Error ? error.message : 'Failed to start download. Please try again.');
+      setIsExporting(false);
+      setIsExportingFile(false);
+      setExportProgress(0);
+    }
   };
 
   if (exportComplete) {
@@ -243,11 +326,11 @@ const ExportOptions: React.FC<ExportOptionsProps> = ({ xmlContent, fileName }) =
       {/* Export Button */}
       <div className="flex justify-center">
         <button
-          onClick={handleExport}
+          onClick={() => handleExport(selectedFormat)}
           disabled={isExporting}
           className="bg-gradient-to-r from-green-600 to-emerald-600 text-white px-8 py-4 rounded-lg hover:from-green-700 hover:to-emerald-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-3 text-lg font-semibold"
         >
-          {isExporting ? (
+          {isExportingFile ? (
             <>
               <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
               <span>Exporting...</span>
@@ -261,10 +344,15 @@ const ExportOptions: React.FC<ExportOptionsProps> = ({ xmlContent, fileName }) =
         </button>
       </div>
 
-      {isExporting && (
+      {isExportingFile && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
           <p className="text-blue-800 font-medium">Converting to {exportFormats.find(f => f.id === selectedFormat)?.name}...</p>
-          <p className="text-blue-700 text-sm mt-1">This may take a few moments depending on file size.</p>
+          <p className="text-blue-700 text-sm mt-1">
+            This may take a few moments depending on file size.
+          </p>
+          <div className="w-full bg-gray-200 rounded-full h-2.5 mt-4">
+            <div className="bg-blue-600 h-2.5 rounded-full" style={{ width: `${exportProgress}%` }}></div>
+          </div>
         </div>
       )}
     </div>

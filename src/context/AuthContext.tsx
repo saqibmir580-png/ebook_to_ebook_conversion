@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { toast } from 'react-toastify';
 
 interface User {
   email: string;
   full_name: string;
+  subscription?: string;
 }
 
 interface AuthContextType {
@@ -10,7 +12,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   loading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean }>;
-  register: (fullName: string, email: string, password: string, confirmPassword: string) => Promise<{ success: boolean }>;
+  register: (fullName: string, email: string, password: string, confirmPassword: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
 }
 
@@ -32,13 +34,14 @@ const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
           'Content-Type': 'application/json'
         }
       });
-      
+
       const userData = await response.json();
-      
+
       if (response.ok) {
         setUser({
           email: userData.email,
-          full_name: userData.full_name || userData.email
+          full_name: userData.full_name || userData.email,
+          subscription: userData.subscription
         });
         setIsAuthenticated(true);
       } else {
@@ -72,7 +75,7 @@ const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         setLoading(false);
       }
     };
-    
+
     checkAuth();
   }, []);
 
@@ -80,6 +83,7 @@ const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     setLoading(true);
     try {
       // First, get the access token
+
       const response = await fetch('http://localhost:8000/api/v1/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -90,20 +94,39 @@ const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         }),
       });
 
+
+      const responseData = await response.json();
+
+
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to login');
+        const errorMessage = responseData.detail || 'Failed to login. Please check your credentials.';
+        toast.error(errorMessage, {
+          position: "top-right",
+          autoClose: 5000,
+          hideProgressBar: false,
+          closeOnClick: true,
+          pauseOnHover: true,
+          draggable: true,
+          progress: undefined,
+        });
+        throw new Error(errorMessage);
       }
 
-      const data = await response.json();
-      
       // Store tokens
-      localStorage.setItem('access_token', data.access_token);
-      localStorage.setItem('refresh_token', data.refresh_token);
-      
+      localStorage.setItem('access_token', responseData.access_token);
+      localStorage.setItem('refresh_token', responseData.refresh_token);
+
       // Fetch and set user data
-      await fetchUserData(data.access_token);
-      
+      await fetchUserData(responseData.access_token);
+      toast.success('Login successful!', {
+        position: "top-right",
+        autoClose: 5000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+        progress: undefined,
+      });
       return { success: true };
     } catch (error) {
       console.error('Login error:', error);
@@ -120,40 +143,61 @@ const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       const response = await fetch('http://localhost:8000/api/v1/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          full_name: fullName, 
-          email, 
-          password, 
-          confirm_password: confirmPassword 
+        body: JSON.stringify({
+          full_name: fullName,
+          email,
+          password,
+          confirm_password: confirmPassword
         }),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to register');
+        const errorMessage = data.detail || 'Failed to register';
+        toast.error(errorMessage, {
+          position: "top-right",
+          autoClose: 5000,
+          hideProgressBar: false,
+          closeOnClick: true,
+          pauseOnHover: true,
+          draggable: true,
+          progress: undefined,
+        });
+        throw new Error(errorMessage);
       }
-      
-      // After successful registration, log the user in automatically
-      await login(email, password);
-      
+
+      toast.success('Registration successful!', {
+        position: "top-right",
+        autoClose: 5000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+        progress: undefined,
+      });
+
       return { success: true };
     } catch (error) {
-      console.error('Registration error:', error);
-      throw error;
+      if (error instanceof Error) {
+        return { success: false, error: error.message };
+      }
+      return { success: false, error: 'An unknown error occurred' };
     } finally {
       setLoading(false);
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
     try {
       // You might want to call a logout endpoint here if you have one
-      // await fetch('http://localhost:8000/api/v1/auth/logout', {
-      //   method: 'POST',
-      //   headers: {
-      //     'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-      //   }
-      // });
+      await fetch('http://localhost:8000/api/v1/auth/logout', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        }
+      });
+      toast.success('Logout successful!');
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
@@ -165,9 +209,18 @@ const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     }
   };
 
+  // Debug: Log toast container status
+  useEffect(() => {
+    console.log('Toast container status:', {
+      isToastContainerMounted: document.querySelector('.Toastify') !== null,
+      toast: typeof toast,
+      toastContainer: document.querySelector('.Toastify')
+    });
+  }, []);
+
   return (
     <AuthContext.Provider value={{ user, isAuthenticated, loading, login, register, logout }}>
-      {!loading && children}
+      {children}
     </AuthContext.Provider>
   );
 };

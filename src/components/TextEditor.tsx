@@ -1,5 +1,34 @@
 import React, { useState, useEffect } from 'react';
 import { Wand2, AlertCircle, CheckCircle, RotateCcw } from 'lucide-react';
+import formulaConverter from '../utils/formulaConverter';
+
+// Add CSS for mathematical fonts
+const mathFontStyles = `
+  @import url('https://fonts.googleapis.com/css2?family=STIX+Two+Math&display=swap');
+  
+  .math-text {
+    font-family: 'STIX Two Math', 'Times New Roman', 'Cambria Math', serif;
+    font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1;
+    font-variant-numeric: normal;
+    line-height: 1.6;
+  }
+  
+  .formula-highlight {
+    background-color: #f0f9ff;
+    padding: 2px 4px;
+    border-radius: 3px;
+    border-left: 3px solid #3b82f6;
+    display: inline-block;
+    margin: 1px 0;
+  }
+`;
+
+// Inject styles into document head
+if (typeof document !== 'undefined') {
+  const styleElement = document.createElement('style');
+  styleElement.textContent = mathFontStyles;
+  document.head.appendChild(styleElement);
+}
 
 interface TextEditorProps {
   initialText: string;
@@ -18,6 +47,42 @@ const TextEditor: React.FC<TextEditorProps> = ({ initialText, onTextChange, onNe
   const [isSpellChecking, setIsSpellChecking] = useState(false);
   const [spellingErrors, setSpellingErrors] = useState<SpellingError[]>([]);
   const [selectedError, setSelectedError] = useState<SpellingError | null>(null);
+
+  const convertFormulaSymbols = (inputText: string): string => {
+    if (!inputText) return inputText;
+    
+    let convertedText = inputText;
+    
+    // First, apply the comprehensive formula converter to any LaTeX patterns
+    convertedText = formulaConverter.convertToReadable(convertedText);
+    
+    // Then apply specific diamond symbol mappings for OCR artifacts
+    const symbolMappings = {
+      '◆': '', // Remove diamond symbols
+      '| z |': '|z|',
+      '| z d | |': '|εz|',
+      '◆ L |': 'ΔL',
+      'd dl ◆': 'dL/dl',
+      '◆ ◆': '',
+      '( ) ( )': '',
+      'exp [ ]': 'exp',
+      '◆ | z ◆ ◆ | L z ( ) ( ) 0 exp [ ] ◆': '|εz| = L₀ exp(εz)',
+      '( ) ( ) ( ) ◆ ◆': 'θ',
+      '◆ L': 'ΔL',
+      '0 exp [ L(z) ]': '₀ exp[L(z)]'
+    };
+    
+    // Apply symbol mappings
+    for (const [symbol, replacement] of Object.entries(symbolMappings)) {
+      convertedText = convertedText.replace(new RegExp(symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), replacement);
+    }
+    
+    // Clean up extra spaces
+    convertedText = convertedText.replace(/\s+/g, ' ');
+    convertedText = convertedText.replace(/\n\s*\n/g, '\n\n');
+    
+    return convertedText.trim();
+  };
 
   useEffect(() => {
     onTextChange(text);
@@ -127,9 +192,11 @@ const TextEditor: React.FC<TextEditorProps> = ({ initialText, onTextChange, onNe
         <div>
           <h3 className="font-semibold text-gray-900 mb-3">Original Extracted Text</h3>
           <div className="bg-gray-50 p-4 rounded-lg h-96 overflow-y-auto">
-            <pre className="text-sm text-gray-700 whitespace-pre-wrap font-mono">
-              {initialText}
-            </pre>
+            <div 
+              className="text-sm text-gray-700 whitespace-pre-wrap math-text"
+            >
+              {convertFormulaSymbols(initialText)}
+            </div>
           </div>
         </div>
 
@@ -139,7 +206,8 @@ const TextEditor: React.FC<TextEditorProps> = ({ initialText, onTextChange, onNe
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            className="w-full h-96 p-4 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full h-96 p-4 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent math-text"
+            style={{ fontSize: '14px' }}
             placeholder="Edit your text here..."
           />
         </div>
