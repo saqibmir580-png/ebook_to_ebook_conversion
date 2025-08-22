@@ -32,10 +32,17 @@ def get_current_user(
         token_data = TokenPayload(**payload)
         if token_data.sub is None:
             raise credentials_exception
-    except JWTError:
+        
+        # Convert string subject to integer for database lookup
+        try:
+            user_id = int(token_data.sub) if isinstance(token_data.sub, str) else token_data.sub
+        except (ValueError, TypeError):
+            raise credentials_exception
+            
+    except (JWTError, ValueError, TypeError):
         raise credentials_exception
     
-    user = db.query(User).filter(User.id == token_data.sub).first()
+    user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         raise credentials_exception
     if not user.is_active:

@@ -6,7 +6,7 @@ import logging
 
 from app.core.config import settings
 from app.api.api_v1.api import api_router
-
+from app.routes.public_downloads import router as public_downloads_router
 
 # Configure logging
 logging.basicConfig(
@@ -23,7 +23,6 @@ app = FastAPI(
 )
 
 # Set up CORS
-# List of allowed origins (add your frontend URLs here)
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -37,18 +36,23 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 
 # Create uploads directory if it doesn't exist
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+os.makedirs(settings.OUTPUT_DIR, exist_ok=True)
+os.makedirs(settings.EXTRACTED_IMAGES_DIR, exist_ok=True)
 
-# Mount static files (uploads) - for development only
-# In production, use a proper file server or cloud storage
+# Mount static files
 app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+app.mount("/static", StaticFiles(directory=settings.STATIC_DIR), name="static")
 
-# Include API router
+# Include API router (this includes most authenticated routes)
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# Include public downloads router without authentication
+app.include_router(public_downloads_router, prefix="/api/v1/downloads/public", tags=["public-downloads"])
 
 
 @app.get("/")

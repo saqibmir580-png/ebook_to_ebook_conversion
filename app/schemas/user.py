@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 from pydantic import BaseModel, EmailStr, field_validator, FieldValidationInfo
 from datetime import datetime
 
@@ -34,7 +34,7 @@ class UserInDBBase(UserBase):
     updated_at: datetime
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class User(UserInDBBase):
@@ -52,7 +52,7 @@ class Token(BaseModel):
 
 
 class TokenPayload(BaseModel):
-    sub: Optional[int] = None
+    sub: Optional[Union[str, int]] = None
     role: Optional[str] = None
     exp: Optional[int] = None
 

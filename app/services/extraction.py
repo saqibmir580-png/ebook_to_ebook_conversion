@@ -11,8 +11,8 @@ import re
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 import logging
-
 from app.models.upload import FileType
+from app.utils.ocr_utils import process_file
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +58,43 @@ class EbookExtractor:
             logger.error(f"Error extracting content: {str(e)}")
             raise
     
-    def _extract_from_pdf(self) -> Tuple[List[str], List[Dict], List[str], Dict]:
-        """Extract content from PDF file"""
+    def _extract_from_pdf(self) -> Tuple[List[Dict], List[Dict], List[str], Dict]:
+        """Extract content from PDF file using proper LaTeX OCR"""
+        try:
+            # Use the proper OCR processing pipeline
+            text_output, json_data, extracted_images = process_file(self.file_path)
+            
+            # Parse the JSON data to extract formulas
+            formulas = []
+            structure = {"fonts": [], "layout": []}
+            
+            # Process the JSON data from OCR to extract formulas
+            for page_data in json_data:
+                for block in page_data.get("blocks", []):
+                    if block.get("type") == "formula":
+                        formula_content = block.get("content", "")
+                        if formula_content:
+                            formulas.append(f"Formula on page {page_data.get('page_num', 1)}: {formula_content}")
+            
+            # Update metadata
+            self.metadata["page_count"] = len(json_data) if json_data else 1
+            self.metadata["image_count"] = len(extracted_images)
+            self.metadata["formula_count"] = len(formulas)
+            
+            print(f"DEBUG: Extracted {len(formulas)} formulas using LaTeX OCR")
+            for i, formula in enumerate(formulas[:3]):  # Show first 3 formulas for debugging
+                print(f"DEBUG: Formula {i+1}: {formula}")
+            
+            # Return the structured JSON data instead of flattened text
+            return json_data, extracted_images, formulas, structure
+            
+        except Exception as e:
+            logger.error(f"Error extracting PDF content with LaTeX OCR: {str(e)}")
+            # Fallback to basic extraction
+            return self._extract_from_pdf_basic()
+    
+    def _extract_from_pdf_basic(self) -> Tuple[List[str], List[str], List[str], Dict]:
+        """Fallback basic PDF extraction without LaTeX OCR"""
         text_by_page = []
         images = []
         formulas = []
@@ -69,9 +104,7 @@ class EbookExtractor:
             with open(self.file_path, 'rb') as file:
                 pdf_reader = PyPDF2.PdfReader(file)
                 
-                # Get text by page
-                for page_num in range(len(pdf_reader.pages)):
-                    page = pdf_reader.pages[page_num]
+                for page_num, page in enumerate(pdf_reader.pages):
                     text = page.extract_text()
                     text_by_page.append(text)
                     
@@ -82,10 +115,8 @@ class EbookExtractor:
                 
                 # Update metadata
                 self.metadata["page_count"] = len(pdf_reader.pages)
-                
-                # Extract basic structure info - this would be more complex in a real implementation
-                if "/Font" in pdf_reader.trailer.get("/Root", {}).get("/Pages", {}):
-                    structure["fonts"] = ["PDF contains fonts"]
+                self.metadata["image_count"] = 0  # Basic extraction doesn't handle images
+                self.metadata["formula_count"] = len(formulas)
                 
                 # In a real implementation, more detailed PDF structure extraction would happen here
                 
@@ -189,23 +220,39 @@ class EbookExtractor:
             # Add content
             content = ET.SubElement(root, "content")
             
-            # Add text
+            # Add text from structured data
             text_section = ET.SubElement(content, "text")
-            for i, t in enumerate(text):
-                page = ET.SubElement(text_section, "page" if self.file_type == FileType.PDF else "section")
-                page.set("id", str(i + 1))
-                page.text = t
+            for i, page_data in enumerate(text):  # `text` is now `json_data`
+                page_elem = ET.SubElement(text_section, "page")
+                page_elem.set("id", str(i + 1))
+                
+                # Add blocks with their semantic types
+                for block in page_data.get("blocks", []):
+                    block_type = block.get("type")
+                    # Skip formula and image blocks as they are handled separately
+                    if block_type in ["formula", "image"]:
+                        continue
+                    
+                    # Use block type as the tag name, default to 'text'
+                    tag_name = block_type or "text"
+                    block_elem = ET.SubElement(page_elem, tag_name)
+                    block_elem.text = block.get("content", "")
             
             # Add images
             if images:
+                logger.info(f"Adding {len(images)} images to XML")
                 images_section = ET.SubElement(content, "images")
-                for i, img in enumerate(images):
-                    image = ET.SubElement(images_section, "image")
-                    image.set("id", str(i + 1))
-                    if "name" in img:
-                        image.set("name", img["name"])
-                    if "path" in img:
-                        image.set("path", img["path"])
+                for i, img_path in enumerate(images):
+                    logger.info(f"Adding image {i+1}: {img_path}")
+                    # Use TEI namespace structure that the HTML converter expects
+                    graphic = ET.SubElement(images_section, "{http://www.tei-c.org/ns/1.0}graphic")
+                    # img_path already includes 'extracted_images/' prefix from ocr_utils.py
+                    full_url = f"http://localhost:8000/static/{img_path}"
+                    graphic.set("{http://www.w3.org/1999/xlink}href", full_url)
+                    graphic.set("id", str(i + 1))
+                    logger.info(f"Image URL set to: {full_url}")
+            else:
+                logger.warning("No images to add to XML")
             
             # Add formulas
             if formulas:

@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     
     # File Upload Settings
     UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "uploads")
+    OUTPUT_DIR: str = os.getenv("OUTPUT_DIR", "outputs")
+    EXTRACTED_IMAGES_DIR: str = os.getenv("EXTRACTED_IMAGES_DIR", "static/extracted_images")
+    STATIC_DIR: str = os.getenv("STATIC_DIR", "static")
+    ALLOWED_EXTENSIONS: List[str] = ["png", "jpg", "jpeg", "pdf"]
     MAX_UPLOAD_SIZE_FREE: int = int(os.getenv("MAX_UPLOAD_SIZE_FREE", 10485760))  # 10MB
     MAX_UPLOAD_SIZE_PREMIUM: int = int(os.getenv("MAX_UPLOAD_SIZE_PREMIUM", 104857600))  # 100MB
     FREE_DAILY_CONVERSIONS: int = int(os.getenv("FREE_DAILY_CONVERSIONS", 3))

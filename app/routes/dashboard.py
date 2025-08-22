@@ -52,6 +52,27 @@ def get_statistics(
     }
 
 
+@router.get("/uploads", response_model=List[UploadSchema])
+def get_user_uploads(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    skip: int = 0,
+    limit: int = 10,
+) -> Any:
+    """
+    Get all uploads for the current user.
+    """
+    uploads = (
+        db.query(Upload)
+        .filter(Upload.user_id == current_user.id)
+        .order_by(Upload.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return uploads
+
+
 @router.get("/admin", response_model=List[UploadSchema])
 def get_admin_dashboard(
     status: Optional[str] = None,

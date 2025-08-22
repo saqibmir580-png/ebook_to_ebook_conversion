@@ -1,5 +1,7 @@
 import os
 import time
+import threading
+import logging
 from typing import Any, List
 from datetime import datetime, timedelta
 
@@ -8,7 +10,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.core.config import settings
-from app.db.session import get_db
+from app.db.session import get_db, SessionLocal
 from app.models.user import User, UserRole
 from app.models.upload import Upload, FileType, ProcessingStatus
 from app.schemas.upload import Upload as UploadSchema, UploadWithDownloadUrls
@@ -20,6 +22,9 @@ from app.services.extraction import EbookExtractor
 from app.services.xml_validation import XMLValidator
 from app.services.conversion import EbookConverter
 
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -27,41 +32,76 @@ router = APIRouter()
 def process_upload(
     upload_id: int, 
     file_path: str, 
-    file_type: FileType, 
-    db: Session
+    file_type: FileType
 ) -> None:
     """
-    Background task to process an uploaded e-book file
+    Background task to process an uploaded e-book file with visible progress
     """
+    logger.info(f"Starting background processing for upload {upload_id}")
+    db = SessionLocal()
+    
     try:
         # Get upload from database
         upload = db.query(Upload).filter(Upload.id == upload_id).first()
         if not upload:
+            logger.error(f"Upload {upload_id} not found")
             return
         
+        logger.info(f"Setting upload {upload_id} to PROCESSING status")
         # Update status to processing
         upload.status = ProcessingStatus.PROCESSING
+        upload.progress = 0
         db.commit()
         
-        # Extract content
+        # Add longer delay to make progress visible
+        logger.info(f"Upload {upload_id}: Starting with 5 second delay")
+        time.sleep(5)
+        
+        # Step 1: Extract content (0-40%)
+        logger.info(f"Upload {upload_id}: Progress 10%")
+        upload.progress = 10
+        db.commit()
+        time.sleep(3)
+        
+        logger.info(f"Upload {upload_id}: Creating extractor")
         extractor = EbookExtractor(file_path, file_type)
+        upload.progress = 20
+        db.commit()
+        time.sleep(3)
+        
+        logger.info(f"Upload {upload_id}: Extracting content")
         xml_path = extractor.extract()
         upload.xml_path = xml_path
         upload.page_count = extractor.metadata["page_count"]
         upload.image_count = extractor.metadata["image_count"]
         upload.formula_count = extractor.metadata["formula_count"]
+        upload.progress = 40
         db.commit()
+        time.sleep(3)
         
-        # Validate XML
+        # Step 2: Validate XML (40-50%)
+        logger.info(f"Upload {upload_id}: Validating XML")
         validator = XMLValidator(xml_path)
         is_valid, message = validator.validate()
         upload.is_xml_valid = is_valid
+        upload.progress = 50
         db.commit()
+        time.sleep(2)
         
         if is_valid:
-            # Convert to other formats
+            # Step 3: Convert to other formats (50-90%)
+            logger.info(f"Upload {upload_id}: Starting conversion")
+            upload.progress = 60
+            db.commit()
+            time.sleep(3)
+            
             converter = EbookConverter(xml_path)
             result_paths = converter.convert()
+            
+            logger.info(f"Upload {upload_id}: Conversion complete")
+            upload.progress = 80
+            db.commit()
+            time.sleep(2)
             
             # Update paths
             if "html" in result_paths:
@@ -71,21 +111,32 @@ def process_upload(
             if "mobi" in result_paths:
                 upload.mobi_path = result_paths["mobi"]
             
+            upload.progress = 90
+            db.commit()
+            time.sleep(2)
+            
             # Update status to completed
+            logger.info(f"Upload {upload_id}: Setting to COMPLETED")
             upload.status = ProcessingStatus.COMPLETED
+            upload.progress = 100  # Set progress to 100% when completed
             upload.processing_time = extractor.metadata["processing_time"]
         else:
             # Update status to failed
+            logger.error(f"Upload {upload_id}: XML validation failed - {message}")
             upload.status = ProcessingStatus.FAILED
             upload.error_message = message
         
         db.commit()
+        logger.info(f"Upload {upload_id}: Processing complete")
         
     except Exception as e:
         # Update status to failed
+        logger.error(f"Upload {upload_id}: Processing failed - {str(e)}")
         upload.status = ProcessingStatus.FAILED
         upload.error_message = str(e)
         db.commit()
+    finally:
+        db.close()
 
 
 @router.post("", response_model=UploadSchema)
@@ -158,9 +209,7 @@ async def create_upload(
         db.refresh(upload)
         
         # Start background processing
-        background_tasks.add_task(
-            process_upload, upload.id, file_path, file_type, db
-        )
+        background_tasks.add_task(process_upload, upload.id, file_path, file_type)
         
         return upload
         
@@ -174,6 +223,33 @@ async def create_upload(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+
+@router.get("/public", response_model=List[UploadSchema])
+def get_public_uploads(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+) -> Any:
+    """
+    Get demo uploads (public access for non-logged in users)
+    """
+    # Return empty list for non-authenticated users
+    return []
+
+
+@router.get("/public/{upload_id}", response_model=UploadWithDownloadUrls)
+def get_public_upload(
+    upload_id: int,
+    db: Session = Depends(get_db),
+) -> Any:
+    """
+    Get demo upload (public access for non-logged in users)
+    """
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Please login to view your projects"
+    )
 
 
 @router.get("", response_model=List[UploadSchema])

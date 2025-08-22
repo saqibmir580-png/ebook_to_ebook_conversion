@@ -45,7 +45,8 @@ class Upload(Base):
     # Processing metrics
     processing_time = Column(Float, nullable=True)  # Time in seconds
     error_message = Column(Text, nullable=True)
-    
+    progress = Column(Integer, default=0, nullable=False)
+
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     
